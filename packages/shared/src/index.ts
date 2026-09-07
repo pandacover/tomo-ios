@@ -9,8 +9,8 @@ export {
   MAX_DEVICES,
   MAX_PERSISTED_MESSAGES,
   MAX_PUSH_ATTEMPTS,
-  nextPushRetryDelaySeconds,
   NO_DEVICE_RETRY_SECONDS,
+  nextPushRetryDelaySeconds,
   PUSH_RETRY_BASE_SECONDS,
   UTILITY_MODEL,
 } from "./models";

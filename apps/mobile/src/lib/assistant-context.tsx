@@ -71,7 +71,9 @@ function syncTimezone(agent: AgentHandle): Effect.Effect<void, never> {
   }).pipe(Effect.catchAll(() => Effect.void));
 }
 
-const readyRetry = Schedule.spaced(Duration.millis(400)).pipe(Schedule.intersect(Schedule.recurs(20)));
+const readyRetry = Schedule.spaced(Duration.millis(400)).pipe(
+  Schedule.intersect(Schedule.recurs(20)),
+);
 const registerRetry = Schedule.spaced(Duration.millis(400)).pipe(
   Schedule.intersect(Schedule.recurs(10)),
 );
@@ -83,6 +85,8 @@ export function AssistantProvider({
   const assistant = useAssistant(credentials);
   const [pushNotice, setPushNotice] = useState<string | null>(null);
 
+  // Re-run when the bearer token rotates even if useAgent keeps the same object.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: token rotation must restart registration
   useEffect(() => {
     const agent = assistant.agent as AgentHandle;
     const fiber = Effect.runFork(
@@ -122,7 +126,10 @@ export function AssistantProvider({
     return () => sub.remove();
   }, [assistant.agent]);
 
-  const value = useMemo<AssistantApi>(() => ({ ...assistant, pushNotice }), [assistant, pushNotice]);
+  const value = useMemo<AssistantApi>(
+    () => ({ ...assistant, pushNotice }),
+    [assistant, pushNotice],
+  );
   return createElement(AssistantContext.Provider, { value }, children);
 }
 

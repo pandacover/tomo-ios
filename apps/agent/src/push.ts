@@ -78,7 +78,8 @@ export function sendExpoPush(
     if (!response.ok) {
       const text = yield* Effect.tryPromise({
         try: () => response.text(),
-        catch: () => new PushHttpError({ message: "expo push body unread", status: response.status }),
+        catch: () =>
+          new PushHttpError({ message: "expo push body unread", status: response.status }),
       }).pipe(Effect.orElseSucceed(() => ""));
       return yield* new PushHttpError({
         message: `expo push ${response.status}: ${text.slice(0, 200)}`,

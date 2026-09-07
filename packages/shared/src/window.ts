@@ -24,9 +24,6 @@ export function recentWindow<T>(
 }
 
 /** Messages in `trimmed` that have not yet been summarized. */
-export function unsummarizedTrimmed<T>(
-  trimmed: readonly T[],
-  lastSummarizedCount: number,
-): T[] {
+export function unsummarizedTrimmed<T>(trimmed: readonly T[], lastSummarizedCount: number): T[] {
   return trimmed.slice(Math.max(0, lastSummarizedCount));
 }

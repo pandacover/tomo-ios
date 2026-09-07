@@ -1,5 +1,10 @@
-import { describe, expect, test } from "bun:test";
-import { markCallable } from "../src/callable";
+import { describe, expect, mock, test } from "bun:test";
+
+mock.module("agents", () => ({
+  callable: () => (method: unknown) => method,
+}));
+
+const { markCallable } = await import("../src/callable");
 
 class Probe {
   ping() {

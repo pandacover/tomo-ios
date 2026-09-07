@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import {
-  isRetryablePushFailure,
-  NoDevices,
-  pruneDevices,
-  sendExpoPush,
-} from "../src/push";
+import { isRetryablePushFailure, NoDevices, pruneDevices, sendExpoPush } from "../src/push";
 
 const device = {
   expoPushToken: "ExponentPushToken[aaa]",
