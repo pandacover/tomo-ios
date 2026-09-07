@@ -1,6 +1,6 @@
 # tomo v0 — personal AI assistant for iOS
 
-Status: proposed plan. Nothing in this document is built yet.
+Status: implemented in this repo. See the README for run/deploy.
 
 ## 1. What v0 is
 
@@ -337,7 +337,7 @@ Exit: one week of daily personal use with no reinstall, no lost messages, and co
 | Multiple threads | Requires a per-user index DO and thread routing; the single-thread model is a deliberate product simplification. |
 | Multi-user / Sign in with Apple | Adds identity, per-user secrets, and billing concerns. The `containerTag`/instance-name design already makes this a swap, not a rewrite. |
 | Integrations (calendar, mail, Notion, GitHub) | Each is an OAuth flow plus a tool surface. The Agents SDK MCP client is the intended path (`addMcpServer`), evaluated after v0. |
-| Attachments / images | Needs R2 and vision-capable model plumbing. |
+| Attachments / images | Needs R2 for storage and upload UX. The model side is already covered: image parts route to `UTILITY_MODEL`. |
 | Proactive check-ins (`scheduleEvery`) | Easy to add mechanically; hard to make non-annoying. Do it once memory quality is proven. |
 | Workflows / Queues | No multi-minute background jobs in v0. |
 | Android / web | Expo makes it cheap later; not the target user. |

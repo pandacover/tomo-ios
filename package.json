@@ -1,0 +1,21 @@
+{
+  "name": "tomo-ios",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:agent": "bun run --filter @tomo/agent dev",
+    "dev:mobile": "bun run --filter @tomo/mobile start",
+    "check": "bun run lint && bun run typecheck && bun run test && bun run --filter @tomo/agent dry-run",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun test packages/shared apps/agent/test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.4",
+    "typescript": "^5.9.2"
+  }
+}
