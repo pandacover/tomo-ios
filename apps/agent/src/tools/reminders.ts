@@ -14,7 +14,7 @@ export type ReminderHost = {
   schedule: (
     when: Date | string | number,
     callback: "sendReminder",
-    payload: { id: string; text: string },
+    payload: { id: string; text: string; attempt: number },
   ) => Promise<{ id: string } | string>;
   cancelSchedule: (id: string) => Promise<boolean> | boolean;
 };
@@ -32,6 +32,7 @@ export function reminderTools(agent: ReminderHost) {
         const scheduled = await agent.schedule(new Date(parsed.dueAtMs), "sendReminder", {
           id,
           text,
+          attempt: 0,
         });
         const scheduleId = typeof scheduled === "string" ? scheduled : scheduled.id;
         const reminder: Reminder = { id, text, dueAt: parsed.dueAtMs, scheduleId };

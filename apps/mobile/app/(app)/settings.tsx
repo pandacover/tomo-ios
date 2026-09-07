@@ -1,6 +1,6 @@
 import { type AgentState, CHAT_MODEL_ALLOWLIST } from "@tomo/shared";
 import { router, Stack } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useAssistantContext } from "@/src/lib/assistant-context";
 import { useAuth } from "@/src/lib/auth-context";
@@ -10,8 +10,16 @@ export default function SettingsScreen() {
   const { agent, chat } = useAssistantContext();
   const { signOut } = useAuth();
   const state = (agent.state ?? {}) as Partial<AgentState>;
-  const [name, setName] = useState(state.prefs?.name ?? "");
+  const [name, setName] = useState("");
+  const [hydrated, setHydrated] = useState(false);
   const selectedModel = state.prefs?.model ?? CHAT_MODEL_ALLOWLIST[0];
+
+  useEffect(() => {
+    const next = state.prefs?.name;
+    if (!next || hydrated) return;
+    setName(next);
+    setHydrated(true);
+  }, [state.prefs?.name, hydrated]);
 
   const stub = agent as {
     stub?: {

@@ -1,3 +1,4 @@
+import type { AgentState } from "@tomo/shared";
 import { Link, Stack } from "expo-router";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from "react-native";
@@ -8,7 +9,8 @@ import { useAssistantContext } from "@/src/lib/assistant-context";
 import { colors } from "@/src/theme";
 
 export default function ChatScreen() {
-  const { chat } = useAssistantContext();
+  const { agent, chat, pushNotice } = useAssistantContext();
+  const state = agent.state as AgentState | undefined;
   const [input, setInput] = useState("");
   const busy = Boolean(chat.isStreaming || chat.isRecovering);
 
@@ -34,6 +36,10 @@ export default function ChatScreen() {
         }}
       />
       {chat.isRecovering ? <Text style={styles.hint}>Recovering previous reply…</Text> : null}
+      {pushNotice ? <Text style={styles.error}>{pushNotice}</Text> : null}
+      {state?.lastPushError ? (
+        <Text style={styles.error}>Notifications may not be arriving: {state.lastPushError}</Text>
+      ) : null}
       {chat.status === "error" ? (
         <Text style={styles.error}>Something went wrong. Check the host and token.</Text>
       ) : null}

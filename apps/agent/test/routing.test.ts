@@ -42,6 +42,7 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("Ada");
     expect(prompt).toContain("America/Los_Angeles");
     expect(prompt).toContain("[r1]");
+    expect(prompt).toContain('{ "_": true }');
     expect(prompt.length).toBeLessThan(2000);
   });
 });

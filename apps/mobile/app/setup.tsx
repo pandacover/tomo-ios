@@ -34,7 +34,7 @@ export default function SetupScreen() {
         onChangeText={setHost}
         autoCapitalize="none"
         autoCorrect={false}
-        placeholder="tomo-agent.&lt;account&gt;.workers.dev"
+        placeholder="tomo-agent.<account>.workers.dev"
         placeholderTextColor={colors.muted}
         style={styles.input}
       />

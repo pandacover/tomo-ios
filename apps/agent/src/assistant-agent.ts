@@ -5,18 +5,24 @@ import {
   type Device,
   initialAgentState,
   isAllowedChatModel,
+  MAX_DEVICES,
   MAX_PERSISTED_MESSAGES,
+  MAX_PUSH_ATTEMPTS,
+  nextPushRetryDelaySeconds,
   type PrefsPatch,
   prefsPatchSchema,
   recentWindow,
+  type ReminderDelivery,
+  unsummarizedTrimmed,
 } from "@tomo/shared";
 import type { StreamTextOnFinishCallback, ToolSet } from "ai";
 import { convertToModelMessages, generateText, pruneMessages, stepCountIs, streamText } from "ai";
+import { Effect } from "effect";
 import { markCallable } from "./callable";
 import { chatModel, utilityModel, webSearchTool } from "./llm";
 import { memoryTools, wrapWithMemory } from "./memory";
 import { buildSystemPrompt } from "./prompt";
-import { sendExpoPush } from "./push";
+import { isRetryablePushFailure, pruneDevices, sendExpoPush } from "./push";
 import { clientTools } from "./tools/client";
 import { reminderTools } from "./tools/reminders";
 
@@ -27,8 +33,18 @@ export class AssistantAgent extends AIChatAgent<Env, AgentState> {
   maxPersistedMessages = MAX_PERSISTED_MESSAGES;
 
   override async onStart() {
-    if (!this.state.prefs.model) {
-      this.setState(initialAgentState(this.env.CHAT_MODEL));
+    const prefs = this.state.prefs;
+    if (!prefs?.model) {
+      this.setState({
+        ...this.state,
+        devices: this.state.devices ?? [],
+        reminders: this.state.reminders ?? [],
+        prefs: {
+          timezone: prefs?.timezone ?? "UTC",
+          ...(prefs?.name ? { name: prefs.name } : {}),
+          model: this.env.CHAT_MODEL,
+        },
+      });
     }
   }
 
@@ -41,6 +57,8 @@ export class AssistantAgent extends AIChatAgent<Env, AgentState> {
     }
 
     const { window, trimmed } = recentWindow(this.messages, CONTEXT_WINDOW);
+    const alreadySummarized = this.state.lastSummarizedCount ?? 0;
+    const delta = unsummarizedTrimmed(trimmed, alreadySummarized);
     const model = wrapWithMemory(
       chatModel(this.env, this.state.prefs.model) as never,
       this.env,
@@ -66,8 +84,8 @@ export class AssistantAgent extends AIChatAgent<Env, AgentState> {
       onFinish,
     });
 
-    if (trimmed.length > 0) {
-      this.ctx.waitUntil(this.summarizeTrimmed(trimmed));
+    if (delta.length > 0) {
+      this.ctx.waitUntil(this.summarizeTrimmed(delta, alreadySummarized, trimmed.length));
     }
 
     return result.toUIMessageStreamResponse();
@@ -81,8 +99,15 @@ export class AssistantAgent extends AIChatAgent<Env, AgentState> {
       platform: "ios",
       registeredAt: Date.now(),
     };
-    const devices = [...this.state.devices.filter((d) => d.expoPushToken !== token), next];
+    const devices = [...this.state.devices.filter((d) => d.expoPushToken !== token), next].slice(
+      -MAX_DEVICES,
+    );
     this.setState({ ...this.state, devices, lastPushError: undefined });
+
+    const due = this.state.reminders.filter((reminder) => reminder.dueAt <= Date.now());
+    for (const reminder of due) {
+      this.ctx.waitUntil(this.sendReminder({ id: reminder.id, text: reminder.text, attempt: 0 }));
+    }
     return { ok: true as const, count: devices.length };
   }
 
@@ -101,23 +126,60 @@ export class AssistantAgent extends AIChatAgent<Env, AgentState> {
     return this.state.prefs;
   }
 
-  async sendReminder(payload: { id: string; text: string }) {
-    const result = await sendExpoPush(
-      this.state.devices,
-      { title: "Reminder", body: payload.text, data: { id: payload.id } },
-      this.env.EXPO_ACCESS_TOKEN,
+  async sendReminder(payload: ReminderDelivery) {
+    const attempt = payload.attempt ?? 0;
+    const result = await Effect.runPromise(
+      sendExpoPush(
+        this.state.devices,
+        { title: "Reminder", body: payload.text, data: { id: payload.id } },
+        this.env.EXPO_ACCESS_TOKEN,
+      ).pipe(Effect.either),
     );
+
+    if (result._tag === "Right") {
+      const devices = pruneDevices(this.state.devices, result.right.staleTokens);
+      this.setState({
+        ...this.state,
+        devices,
+        reminders: this.state.reminders.filter((r) => r.id !== payload.id),
+        lastPushError: undefined,
+      });
+      return { ok: true as const };
+    }
+
+    const error = result.left;
+    const stale = "staleTokens" in error ? error.staleTokens : [];
+    const devices = pruneDevices(this.state.devices, stale);
     this.setState({
       ...this.state,
-      reminders: this.state.reminders.filter((r) => r.id !== payload.id),
-      lastPushError: result.ok ? undefined : result.error,
+      devices,
+      lastPushError: error.message,
     });
-    return result;
+
+    const kind = isRetryablePushFailure(error);
+    const stillQueued = this.state.reminders.some((reminder) => reminder.id === payload.id);
+    if (kind && stillQueued && attempt + 1 < MAX_PUSH_ATTEMPTS) {
+      const delay = nextPushRetryDelaySeconds(attempt, kind);
+      const scheduled = await this.schedule(delay, "sendReminder", {
+        id: payload.id,
+        text: payload.text,
+        attempt: attempt + 1,
+      });
+      const scheduleId = typeof scheduled === "string" ? scheduled : scheduled.id;
+      this.setState({
+        ...this.state,
+        reminders: this.state.reminders.map((reminder) =>
+          reminder.id === payload.id ? { ...reminder, scheduleId } : reminder,
+        ),
+        lastPushError: error.message,
+      });
+    }
+    return { ok: false as const, error: error.message };
   }
 
-  private async summarizeTrimmed(trimmed: ChatMessage[]) {
+  private async summarizeTrimmed(delta: ChatMessage[], start: number, end: number) {
     if (!this.env.OPENROUTER_API_KEY || !this.env.SUPERMEMORY_API_KEY) return;
-    const text = trimmed
+    const text = delta
       .map((message) => {
         const body = message.parts
           .filter((part): part is { type: "text"; text: string } => part.type === "text")
@@ -128,22 +190,27 @@ export class AssistantAgent extends AIChatAgent<Env, AgentState> {
       })
       .filter(Boolean)
       .join("\n");
-    if (!text) return;
+    if (!text) {
+      this.setState({ ...this.state, lastSummarizedCount: end });
+      return;
+    }
 
     try {
       const { text: summary } = await generateText({
         model: utilityModel(this.env) as never,
         prompt: `Summarize durable facts about the user from these older conversation turns. Omit assistant chatter and one-off logistics.\n\n${text.slice(0, 12_000)}`,
       });
-      if (!summary.trim()) return;
-      const { default: Supermemory } = await import("supermemory");
-      const client = new Supermemory({ apiKey: this.env.SUPERMEMORY_API_KEY });
-      await client.add({
-        content: summary,
-        containerTag: this.name,
-        customId: `${this.name}:window-summary`,
-        metadata: { type: "window-summary" },
-      });
+      if (summary.trim()) {
+        const { default: Supermemory } = await import("supermemory");
+        const client = new Supermemory({ apiKey: this.env.SUPERMEMORY_API_KEY });
+        await client.add({
+          content: summary,
+          containerTag: this.name,
+          customId: `${this.name}:window:${start}-${end}`,
+          metadata: { type: "window-summary" },
+        });
+      }
+      this.setState({ ...this.state, lastSummarizedCount: end });
     } catch (error) {
       console.error("summarizeTrimmed failed", error);
     }

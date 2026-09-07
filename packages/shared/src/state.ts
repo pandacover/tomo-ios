@@ -28,17 +28,25 @@ export const reminderSchema = z.object({
   scheduleId: z.string().min(1),
 });
 
+export const reminderDeliverySchema = z.object({
+  id: z.string().min(1),
+  text: z.string().min(1),
+  attempt: z.number().int().nonnegative(),
+});
+
 export const agentStateSchema = z.object({
   devices: z.array(deviceSchema),
   prefs: prefsSchema,
   reminders: z.array(reminderSchema),
   lastPushError: z.string().optional(),
+  lastSummarizedCount: z.number().int().nonnegative().optional(),
 });
 
 export type Device = z.infer<typeof deviceSchema>;
 export type Prefs = z.infer<typeof prefsSchema>;
 export type PrefsPatch = z.infer<typeof prefsPatchSchema>;
 export type Reminder = z.infer<typeof reminderSchema>;
+export type ReminderDelivery = z.infer<typeof reminderDeliverySchema>;
 export type AgentState = z.infer<typeof agentStateSchema>;
 
 export function initialAgentState(chatModel: string = CHAT_MODEL): AgentState {
@@ -46,5 +54,6 @@ export function initialAgentState(chatModel: string = CHAT_MODEL): AgentState {
     devices: [],
     prefs: { timezone: "UTC", model: chatModel },
     reminders: [],
+    lastSummarizedCount: 0,
   };
 }

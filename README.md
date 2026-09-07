@@ -62,3 +62,10 @@ bun run --filter @tomo/agent dry-run
 ```
 
 CI runs those on every PR and deploys the Worker from `main` when `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` are set.
+
+## Effect
+
+Effect is used in two places only — not as a rewrite of the agent or chat loop:
+
+- **Worker** (`apps/agent/src/push.ts`): Expo Push send as an `Effect` with tagged errors (`NoDevices`, `PushHttpError`, `PushTicketError`), HTTP 5xx/network retry, and `DeviceNotRegistered` pruning. `sendReminder` keeps the row and reschedules on failure.
+- **iOS** (`apps/mobile/src/lib/notifications.ts`, `assistant-context.tsx`): fetch the Expo push token, wait until the agent stub is callable, then `registerDevice` / `updatePrefs({ timezone })` with retries. Failures surface as an in-app banner instead of failing closed silently.

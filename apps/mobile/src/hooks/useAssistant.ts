@@ -11,6 +11,8 @@ export function useAssistant(credentials: Credentials) {
     name: AGENT_INSTANCE,
     host: credentials.host,
     query: async () => ({ token: credentials.token }),
+    queryDeps: [credentials.token],
+    cacheTtl: 0,
   });
 
   const chat = useAgentChat({
@@ -18,9 +20,19 @@ export function useAssistant(credentials: Credentials) {
     headers: { Authorization: `Bearer ${credentials.token}` },
     onToolCall: async ({ toolCall, addToolOutput }) => {
       if (toolCall.toolName === "getDeviceContext") {
+        const output = await readDeviceContext();
+        const handle = agent as {
+          call?: (method: string, args: unknown[]) => Promise<unknown>;
+          stub?: { updatePrefs?: (patch: { timezone: string }) => Promise<unknown> };
+        };
+        if (handle.call) {
+          void handle.call("updatePrefs", [{ timezone: output.timezone }]);
+        } else {
+          void handle.stub?.updatePrefs?.({ timezone: output.timezone });
+        }
         addToolOutput({
           toolCallId: toolCall.toolCallId,
-          output: await readDeviceContext(),
+          output,
         });
         return;
       }
