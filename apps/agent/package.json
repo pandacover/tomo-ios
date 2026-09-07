@@ -1,0 +1,29 @@
+{
+  "name": "@tomo/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run --outdir dist",
+    "types": "wrangler types ./src/env.d.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/ai-chat": "0.11.0",
+    "@openrouter/ai-sdk-provider": "3.0.0",
+    "@supermemory/tools": "2.3.0",
+    "@tomo/shared": "workspace:*",
+    "agents": "0.22.0",
+    "ai": "^6.0.197",
+    "effect": "^3.22.1",
+    "supermemory": "^4.0.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260907.1",
+    "typescript": "^5.9.2",
+    "wrangler": "^4.113.0"
+  }
+}

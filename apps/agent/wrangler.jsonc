@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tomo-agent",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AssistantAgent",
+        "class_name": "AssistantAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AssistantAgent"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "CHAT_MODEL": "deepseek/deepseek-v4-flash-0731",
+    "UTILITY_MODEL": "google/gemini-3.1-flash-lite:batch"
+  }
+}
