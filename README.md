@@ -61,7 +61,7 @@ bun run test
 bun run --filter @tomo/agent dry-run
 ```
 
-CI runs those on every PR and deploys the Worker from `main` when `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` are set.
+CI runs those on every PR. On push to `main` (or via **Actions → Deploy agent → Run workflow**), `.github/workflows/deploy.yml` publishes `apps/agent` with [wrangler-action](https://github.com/cloudflare/wrangler-action) when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are set as repository secrets. Worker runtime secrets (`APP_TOKEN`, `OPENROUTER_API_KEY`, `SUPERMEMORY_API_KEY`) stay in Wrangler and are not rewritten by the workflow.
 
 ## Effect
 
