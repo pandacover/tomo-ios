@@ -143,14 +143,14 @@ type State = {
 };
 
 export class AssistantAgent extends AIChatAgent<Env, State> {
-  initialState: State = { devices: [], prefs: { timezone: "UTC", model: DEFAULT_MODEL }, reminders: [] };
-  maxPersistedMessages = 500;
+  initialState: State = { devices: [], prefs: { timezone: "UTC", model: CHAT_MODEL }, reminders: [] };
+  maxPersistedMessages = 300;
 
   async onChatMessage(onFinish) {
     const base = openrouter(this.env)(this.state.prefs.model);
     const model = withSupermemory(base, {
       containerTag: this.name,            // "owner"
-      customId: sessionCustomId(this.name), // e.g. owner:2026-09-07
+      customId: sessionCustomId(this.name), // ISO week, e.g. owner:2026-W37
       mode: "full",                        // profile + query-scoped search injected
       addMemory: "always",                 // every turn appended to the session doc
       apiKey: this.env.SUPERMEMORY_API_KEY,
@@ -184,9 +184,10 @@ export class AssistantAgent extends AIChatAgent<Env, State> {
 Notes:
 
 - `this.name` is the DO instance name and doubles as the Supermemory `containerTag`.
-- `customId` is rotated daily so a single Supermemory document does not grow without bound; Supermemory's graph links across documents under the same `containerTag`.
+- `customId` is rotated weekly (ISO week, `owner:YYYY-Www`) so a single Supermemory session document does not grow without bound while still giving the extractor a week of coherent context per document; Supermemory's graph links across documents under the same `containerTag`.
+- `addMemory: "always"`: every turn (user and assistant) is appended to the current week's session document. Nothing relies on the user saying "remember".
 - `withSupermemory` caches the memory fetch per user turn, so tool-call loops within one turn do not re-query.
-- `maxPersistedMessages` is storage, not context. `recentWindow()` decides what the model sees.
+- `maxPersistedMessages = 300` is storage, not context. `recentWindow()` decides what the model sees. 300 covers roughly two to three weeks of daily use as scrollback, keeps the DO's SQLite small, and keeps the history fetch on app mount (`getInitialMessages`) fast on cellular. Anything older is Supermemory's job; if recall proves reliable in M2 this can drop further.
 
 ### 5.3 Tools
 
@@ -233,13 +234,32 @@ Assembled per turn from: assistant persona + operating rules (concise, ask befor
   "durable_objects": { "bindings": [{ "name": "AssistantAgent", "class_name": "AssistantAgent" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AssistantAgent"] }],
   "observability": { "enabled": true },
-  "vars": { "DEFAULT_MODEL": "anthropic/claude-sonnet-4.5" }
+  "vars": {
+    "CHAT_MODEL": "deepseek/deepseek-v4-flash-0731",
+    "UTILITY_MODEL": "google/gemini-3.1-flash-lite:batch"
+  }
 }
 ```
 
 Secrets (`wrangler secret put`): `APP_TOKEN`, `OPENROUTER_API_KEY`, `SUPERMEMORY_API_KEY`, optional `EXPO_ACCESS_TOKEN`.
 
-Model selection is config, not code. Start with one strong default for chat and, if needed, a cheaper model for any non-user-facing generation (none planned in v0). OpenRouter's `models` fallback array covers provider outages.
+Deployed to `tomo-agent.<account>.workers.dev` for v0. No custom domain, no Cloudflare Access; the app token is the only gate. A domain becomes necessary only when Sign in with Apple needs stable redirect URLs (v1).
+
+### 5.7 Models
+
+Model selection is config, not code. Two slots, both OpenRouter ids read from `vars`:
+
+| Slot | Default | Used for |
+|---|---|---|
+| `CHAT_MODEL` | `deepseek/deepseek-v4-flash-0731` | Every user-facing turn: `onChatMessage`, tool-calling loop, web lookups (`:online` variant of the same id). Also the default entry in the Settings model picker. |
+| `UTILITY_MODEL` | `google/gemini-3.1-flash-lite:batch` | Non-user-facing, latency-tolerant generation where a second, cheaper model is preferable: normalising reminder text into `{ text, dueAt }`, any summarisation the memory layer needs (e.g. compressing the trimmed tail of `recentWindow()` into a note before it falls out of context), and multimodal parts (images) if they land before v1. Called via `generateText`, never streamed to the client. |
+
+Rules:
+
+- `CHAT_MODEL` and `UTILITY_MODEL` are the only two ids the Worker knows about; the Settings picker offers `CHAT_MODEL` plus a short static allow-list, and `updatePrefs` rejects anything else.
+- `:batch` is a latency/cost trade, so `UTILITY_MODEL` is never on the critical path of a streamed reply. Anything that must complete before the user sees text uses `CHAT_MODEL`.
+- Provider fallback (`models: [...]` in the OpenRouter provider) is configured per slot; start with the primary id only and add a fallback once a real outage is observed.
+- Tool schemas are validated against `CHAT_MODEL` in M2/M3 since the DeepSeek and Gemini tool-calling paths on OpenRouter differ in strictness; `strict: true` stays on regardless.
 
 ## 6. Mobile design (`apps/mobile`)
 
@@ -247,7 +267,7 @@ Model selection is config, not code. Start with one strong default for chat and,
 
 - **Setup** (first launch): paste the app token + Worker URL (or read from a QR); stored in `expo-secure-store`. Requests notification permission, registers the push token.
 - **Chat** (home): message list rendered from `messages[].parts` — text, tool parts (compact "Set reminder for 9:00" chips, approval UI if a tool requires it), and a "recovering…" hint when `isRecovering` is true. Composer with send/stop.
-- **Settings**: display name, model picker (from a static list), reminders list (read from agent state), clear history, sign out (wipe secure store).
+- **Settings**: display name, model picker (static allow-list, default `deepseek/deepseek-v4-flash-0731`), reminders list (read from agent state), clear history, sign out (wipe secure store).
 
 ### 6.2 Data flow
 
@@ -297,11 +317,11 @@ Ordered by risk, not by feature value. Each milestone ends deployed and runnable
 **M0 — Connectivity spike.** Bare Worker with a `Counter`-style agent and an Expo dev-client app that connects via `useAgent`, calls a `@callable`, receives `onStateUpdate`. Then swap in `AIChatAgent` + `useAgentChat` with a hard-coded OpenRouter model and stream one reply.
 Exit: streamed reply on device; app backgrounded for 30 s mid-reply, foregrounded, reply completes. Metro/polyfill issues are resolved or have a documented workaround.
 
-**M1 — Skeleton and deploy.** Monorepo layout, Biome, shared package, `APP_TOKEN` auth in `onBeforeConnect`/`onBeforeRequest`, setup screen with secure store, Worker deployed to `*.workers.dev` (custom domain optional), GitHub Actions: typecheck + lint + `wrangler deploy` on `main`.
+**M1 — Skeleton and deploy.** Monorepo layout, Biome, shared package, `APP_TOKEN` auth in `onBeforeConnect`/`onBeforeRequest`, setup screen with secure store, Worker deployed to `tomo-agent.<account>.workers.dev`, GitHub Actions: typecheck + lint + `wrangler deploy` on `main`.
 Exit: fresh install → paste token → chat works against production Worker; wrong token is rejected.
 
-**M2 — Memory.** `withSupermemory` in `full` mode, daily `customId` rotation, `searchMemories`/`addMemory` tools with `strict: true`, sliding-window context, system prompt assembly.
-Exit: tell the assistant three facts, clear chat history, reinstall the app; it recalls the facts in a new conversation unprompted where relevant and on explicit ask.
+**M2 — Memory.** `withSupermemory` in `full` mode with `addMemory: "always"`, weekly `customId` rotation, `searchMemories`/`addMemory` tools with `strict: true` validated against `deepseek/deepseek-v4-flash-0731`, sliding-window context, system prompt assembly, `UTILITY_MODEL` wired for the trimmed-tail summary.
+Exit: tell the assistant three facts, clear chat history, reinstall the app; it recalls the facts in a new conversation unprompted where relevant and on explicit ask. Facts stated across an ISO-week boundary are still linked in recall.
 
 **M3 — Reminders and push.** Device registration, `setReminder`/`listReminders`/`cancelReminder`, `schedule()` → Expo Push, `getDeviceContext` client tool for timezone, settings screen showing reminders from state.
 Exit: "remind me in 2 minutes to stretch" produces a notification on a locked phone at the right time in the device's timezone; cancelling removes it.
@@ -331,13 +351,21 @@ Exit: one week of daily personal use with no reinstall, no lost messages, and co
 | Supermemory ingest latency (`dreaming: dynamic` batches) makes "remember" feel broken in testing | Medium | Understand and accept eventual consistency for auto-ingest; use `addMemory` tool for explicit facts; `dreaming: "instant"` only in tests. |
 | Timezone bugs in reminders | High | Always resolve times on the device (`getDeviceContext`) and store absolute epoch; unit-test the helper in `packages/shared`. |
 | Cost drift from profile injection on every turn | Low-Medium | Sliding window + Supermemory per-turn caching; log OpenRouter usage per turn as a data part for visibility. |
-| Tool schema rejection via OpenRouter strict mode | Medium | `strict: true` on all tools; keep zod schemas free of optional fields without defaults; test each tool with the default model. |
+| Profile noise from auto-ingesting assistant turns as well as user turns | Medium | Accepted for v0 by decision. Watch `profile.dynamic` in M2; if assistant chatter pollutes it, first lever is the system prompt (terser replies), second is switching `addMemory` to user-only. |
+| Tool schema rejection via OpenRouter strict mode | Medium | `strict: true` on all tools; keep zod schemas free of optional fields without defaults; test each tool against `CHAT_MODEL` first, then `UTILITY_MODEL`. |
+| `CHAT_MODEL` tool-calling quality (DeepSeek flash tier) is insufficient for multi-step reminder + memory flows | Medium | Keep `stopWhen: stepCountIs(5)`; make tool descriptions explicit; the model picker allow-list lets you swap the chat model without a deploy if it under-performs. |
+| `:batch` variant latency on `UTILITY_MODEL` is unbounded | Low | Never on a streamed path; run utility calls after `onFinish` or from a `schedule()` callback so they cannot delay a reply. |
 | Agents SDK API churn | Medium | Pin versions; the SDK's docs explicitly say to prefer current docs over memory. Re-read `docs/chat-agents.md` before M2. |
 
-## 11. Open decisions
+## 11. Decisions log
 
-1. Default chat model on OpenRouter (and whether to enable `models` fallback list from day one). Config-only; pick at M0.
-2. Custom domain for the Worker vs `workers.dev` for v0. `workers.dev` is fine for a personal app; a domain matters once Sign in with Apple needs stable redirect URLs.
-3. Daily vs weekly `customId` rotation for Supermemory session documents. Start daily; revisit if profile quality suffers from fragmentation.
-4. Whether `addMemory: "always"` (auto-ingest every turn) is desirable, or only user turns. Start with the default; observe profile noise in M2.
-5. Keep `maxPersistedMessages` at 500 or lower it once memory recall is proven.
+| Decision | Value | Notes |
+|---|---|---|
+| Chat model (`CHAT_MODEL`) | `deepseek/deepseek-v4-flash-0731` | All user-facing turns; default in Settings picker. Provider fallback list starts empty. |
+| Utility model (`UTILITY_MODEL`) | `google/gemini-3.1-flash-lite:batch` | Non-user-facing generation and any multimodal parts; never on the streamed path. |
+| Worker hostname | `tomo-agent.<account>.workers.dev` | No custom domain or Cloudflare Access in v0. |
+| Supermemory `customId` rotation | Weekly (ISO week, `owner:YYYY-Www`) | One session document per week per user. |
+| Supermemory ingest | `addMemory: "always"` | Every user and assistant turn appended automatically. |
+| `maxPersistedMessages` | 300 | Chosen for scrollback (~2–3 weeks), small DO SQLite, fast history fetch on mount. Revisit downward after M2. |
+
+Remaining open items are small and can be settled during the milestone where they matter: static allow-list contents for the model picker (M4), whether `UTILITY_MODEL` should also produce the trimmed-tail summary or that step is dropped if Supermemory recall alone suffices (M2), and whether to add an OpenRouter fallback id per slot after the first observed outage.
